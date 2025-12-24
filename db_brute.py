@@ -12,7 +12,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
-from drivers import get_driver, list_drivers
+from drivers import get_driver, list_drivers, HostUnreachable
 
 
 class Status:
@@ -25,6 +25,7 @@ class Status:
         self.output_file = output_file
         self.log_file = log_file
         self.lock = Lock()
+        self.unreachable_hosts = set()
 
     def update(self, host: str, port: int, username: str, password: str, success: bool):
         with self.lock:
@@ -43,6 +44,31 @@ class Status:
                 sys.stdout.write(f"\r\033[K[+] VALID: {target} - {username}:{password}\n")
 
             self._draw_status(target, username, password)
+
+    def skip(self, host: str, port: int, username: str, password: str, reason: str = "unreachable"):
+        with self.lock:
+            self.completed += 1
+            target = f"{host}:{port}"
+
+            if self.log_file:
+                with open(self.log_file, 'a') as f:
+                    f.write(f"SKIPPED {target} {username}:{password} {reason}\n")
+
+            self._draw_status(target, username, password)
+
+    def mark_unreachable(self, host: str, port: int, reason: str) -> bool:
+        with self.lock:
+            target = f"{host}:{port}"
+            if target in self.unreachable_hosts:
+                return False
+            self.unreachable_hosts.add(target)
+            sys.stdout.write(f"\n[!] Marking {target} as unreachable: {reason}\n")
+            sys.stdout.flush()
+            return True
+
+    def is_unreachable(self, host: str, port: int) -> bool:
+        with self.lock:
+            return f"{host}:{port}" in self.unreachable_hosts
 
     def set_current(self, host: str, port: int, username: str, password: str):
         with self.lock:
@@ -64,14 +90,24 @@ class Status:
 
 
 def test_credential(driver, host: str, port: int, username: str, password: str,
-                    timeout: int, status: Status, delay: float = 0) -> bool:
+                    timeout: int, status: Status, delay: float = 0, host_lock: Lock = None) -> bool:
     """Test a single credential against a target."""
-    if delay > 0:
-        time.sleep(delay)
-    status.set_current(host, port, username, password)
-    success = driver.connect(host, port, username, password, timeout)
-    status.update(host, port, username, password, success)
-    return success
+    lock = host_lock if host_lock is not None else Lock()
+    with lock:
+        if delay > 0:
+            time.sleep(delay)
+        if status.is_unreachable(host, port):
+            status.skip(host, port, username, password)
+            return False
+        status.set_current(host, port, username, password)
+        try:
+            success = driver.connect(host, port, username, password, timeout)
+        except HostUnreachable as exc:
+            status.mark_unreachable(host, port, str(exc))
+            status.skip(host, port, username, password, str(exc))
+            return False
+        status.update(host, port, username, password, success)
+        return success
 
 
 def parse_credential_file(filepath: Path) -> list[tuple[str, str]]:
@@ -207,10 +243,12 @@ Examples:
 
     status = Status(total_checks, args.output, args.log)
 
+    host_locks = {target: Lock() for target in targets}
+
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         futures = []
-        for host, port in targets:
-            for username, password in credentials:
+        for username, password in credentials:
+            for host, port in targets:
                 future = executor.submit(
                     test_credential,
                     driver,
@@ -220,7 +258,8 @@ Examples:
                     password,
                     args.timeout,
                     status,
-                    args.delay
+                    args.delay,
+                    host_locks[(host, port)]
                 )
                 futures.append(future)
 

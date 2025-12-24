@@ -1,4 +1,4 @@
-from .base import DatabaseDriver
+from .base import DatabaseDriver, HostUnreachable
 from .mssql import MSSQLDriver
 from .mysql import MySQLDriver
 from .postgres import PostgresDriver
@@ -23,3 +23,6 @@ def get_driver(name: str) -> DatabaseDriver:
 def list_drivers() -> list[str]:
     """Return list of available driver names."""
     return list(DRIVERS.keys())
+
+
+__all__ = ["DatabaseDriver", "HostUnreachable", "get_driver", "list_drivers"]

@@ -3,7 +3,7 @@ import socket
 
 import paramiko
 
-from .base import DatabaseDriver
+from .base import DatabaseDriver, HostUnreachable
 
 
 class SSHDriver(DatabaseDriver):
@@ -40,8 +40,8 @@ class SSHDriver(DatabaseDriver):
             socket.timeout,
             ConnectionResetError,
             OSError,
-        ):
-            return False
+        ) as exc:
+            raise HostUnreachable(str(exc)) from exc
         finally:
             client.close()
 

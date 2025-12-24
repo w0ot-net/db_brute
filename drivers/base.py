@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 
 
+class HostUnreachable(Exception):
+    """Raised when a target host is unreachable or stops responding."""
+
+
 class DatabaseDriver(ABC):
     """Abstract base class for database drivers."""
 
