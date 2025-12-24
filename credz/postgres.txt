@@ -1,0 +1,14 @@
+# PostgreSQL default credentials
+postgres:root
+postgres:
+root:root
+
+# credit: https://github.com/danielmiessler/SecLists
+dcmadmin:passw0rd
+postgres:amber
+postgres:postgres
+postgres:password
+postgres:admin
+admin:admin
+admin:password
+postgres:123
