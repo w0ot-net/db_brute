@@ -156,8 +156,8 @@ Examples:
                         help='Port override (default: DB-specific)')
     parser.add_argument('-c', '--creds', type=Path, default=None,
                         help='Credential file (default: credz/<db>.txt)')
-    parser.add_argument('--threads', type=int, default=10,
-                        help='Number of concurrent threads (default: 10)')
+    parser.add_argument('--threads', type=int, default=1,
+                        help='Number of concurrent threads (default: 1)')
     parser.add_argument('--timeout', type=int, default=5,
                         help='Connection timeout in seconds (default: 5)')
     parser.add_argument('-o', '--output', type=Path, default=Path('./valid_credz.txt'),

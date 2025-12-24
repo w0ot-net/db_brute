@@ -44,7 +44,7 @@ python3 db_brute.py --db mysql -t 192.168.1.100 -c custom_creds.txt -o results.t
 -T, --target-file File containing targets (one per line)
 -p, --port        Port override (default: DB-specific)
 -c, --creds       Credential file (default: credz/<db>.txt)
---threads         Concurrent threads (default: 10)
+--threads         Concurrent threads (default: 1)
 --timeout         Connection timeout in seconds (default: 5)
 -o, --output      Output file for valid creds (default: ./valid_credz.txt)
 -l, --log         Log file for all attempts
