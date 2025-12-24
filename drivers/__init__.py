@@ -2,11 +2,13 @@ from .base import DatabaseDriver
 from .mssql import MSSQLDriver
 from .mysql import MySQLDriver
 from .postgres import PostgresDriver
+from .ssh import SSHDriver
 
 DRIVERS = {
     "mssql": MSSQLDriver,
     "mysql": MySQLDriver,
     "postgres": PostgresDriver,
+    "ssh": SSHDriver,
 }
 
 

@@ -9,17 +9,18 @@ Database credential checker for authorized security testing. Supports multiple d
 | MySQL      | 3306         | pymysql    |
 | MSSQL      | 1433         | pymssql    |
 | PostgreSQL | 5432         | psycopg2   |
+| SSH        | 22           | paramiko   |
 
 ## Installation
 
 ### Ubuntu/Debian
 ```bash
-sudo apt install python3-pymssql python3-pymysql python3-psycopg2
+sudo apt install python3-pymssql python3-pymysql python3-psycopg2 python3-paramiko
 ```
 
 ### pip
 ```bash
-pip3 install pymssql pymysql psycopg2-binary
+pip3 install pymssql pymysql psycopg2-binary paramiko
 ```
 
 ## Usage
@@ -39,7 +40,7 @@ python3 db_brute.py --db mysql -t 192.168.1.100 -c custom_creds.txt -o results.t
 ## Options
 
 ```
---db, -d          Database type: mssql, mysql, postgres (required)
+--db, -d          Database type: mssql, mysql, postgres, ssh (required)
 -t, --target      Single target (host or host:port)
 -T, --target-file File containing targets (one per line)
 -p, --port        Port override (default: DB-specific)

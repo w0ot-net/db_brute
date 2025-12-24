@@ -1,3 +1,4 @@
 pymssql
 pymysql
 psycopg2-binary
+paramiko
