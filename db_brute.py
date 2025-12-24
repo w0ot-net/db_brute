@@ -114,13 +114,15 @@ def parse_credential_file(filepath: Path) -> list[tuple[str, str]]:
     """Parse a credential file with username:password format."""
     credentials = []
     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-        for line in f:
+        for line_num, line in enumerate(f, start=1):
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
             if ':' in line:
                 username, password = line.split(':', 1)
                 credentials.append((username, password))
+            else:
+                print(f"[!] Skipping invalid credential line {line_num} in {filepath}: missing ':'", file=sys.stderr)
     return credentials
 
 

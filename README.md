@@ -37,6 +37,8 @@ python3 db_brute.py --db mssql -T targets.txt
 python3 db_brute.py --db mysql -t 192.168.1.100 -c custom_creds.txt -o results.txt
 ```
 
+Note: If you omit `-c/--creds`, the tool uses the default `credz/<db>.txt` file for the selected database.
+
 ## Options
 
 ```
