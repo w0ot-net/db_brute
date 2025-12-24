@@ -1,4 +1,6 @@
+import logging
 import socket
+
 import paramiko
 
 from .base import DatabaseDriver
@@ -12,6 +14,9 @@ class SSHDriver(DatabaseDriver):
 
     def connect(self, host: str, port: int, username: str, password: str, timeout: int = 5) -> bool:
         """Attempt SSH authentication."""
+        paramiko_logger = logging.getLogger("paramiko")
+        paramiko_logger.setLevel(logging.CRITICAL)
+        paramiko_logger.propagate = False
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
@@ -29,7 +34,13 @@ class SSHDriver(DatabaseDriver):
             return True
         except (paramiko.AuthenticationException, paramiko.BadAuthenticationType):
             return False
-        except (paramiko.SSHException, paramiko.ssh_exception.NoValidConnectionsError, socket.timeout):
+        except (
+            paramiko.SSHException,
+            paramiko.ssh_exception.NoValidConnectionsError,
+            socket.timeout,
+            ConnectionResetError,
+            OSError,
+        ):
             return False
         finally:
             client.close()
