@@ -135,3 +135,4 @@ zyfwp:PrOw!aN_fXp
 manage:!manage
 monitor:!monitor
 padmin:padmin
+admin:administrator
