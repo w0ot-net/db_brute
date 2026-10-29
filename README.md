@@ -94,6 +94,11 @@ ports use 80 for HTTP and 443 for HTTPS. Use `--uri` to change the default
 `/manager/html` path for all Tomcat targets. HTTPS certificate verification is
 disabled to support internal services using self-signed certificates.
 
+Before scheduling credentials, the Tomcat driver requires each target to
+return an HTTP 401 Tomcat Basic-authentication challenge. Redirects and other
+responses are skipped with a diagnostic; specify the redirected URL explicitly
+if it is an in-scope Tomcat Manager endpoint.
+
 ### Credentials file
 ```
 username:password

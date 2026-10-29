@@ -15,6 +15,7 @@ from db_brute import (
     parse_credential_file,
     parse_target,
     parse_targets,
+    preflight_targets,
 )
 from drivers import get_driver
 from drivers.base import HostUnreachable, Target
@@ -29,7 +30,7 @@ class TomcatDriverTests(unittest.TestCase):
         self.assertEqual(driver.default_port, 8080)
         self.assertEqual(driver.uri, "/manager/html")
 
-    def test_http_statuses_match_metasploit_success_behavior(self):
+    def test_http_statuses_match_metasploit_behavior_after_preflight(self):
         cases = (
             (200, True),
             (201, True),
@@ -60,6 +61,71 @@ class TomcatDriverTests(unittest.TestCase):
                     },
                 )
                 connection.close.assert_called_once_with()
+
+    def test_preflight_accepts_tomcat_basic_authentication_challenge(self):
+        connection = mock.Mock()
+        response = connection.getresponse.return_value
+        response.status = 401
+        response.getheader.return_value = 'Basic realm="Tomcat Manager Application"'
+
+        with mock.patch(
+            "drivers.tomcat.http.client.HTTPConnection",
+            return_value=connection,
+        ):
+            reason = TomcatDriver().preflight_target(
+                Target("tomcat.example", 8080, "http"), timeout=7
+            )
+
+        self.assertIsNone(reason)
+        connection.request.assert_called_once_with(
+            "GET",
+            "/manager/html",
+            headers={"User-Agent": "db_brute"},
+        )
+        connection.close.assert_called_once_with()
+
+    def test_preflight_rejects_unconditional_redirect(self):
+        connection = mock.Mock()
+        response = connection.getresponse.return_value
+        response.status = 302
+        response.getheader.side_effect = lambda name, default=None: {
+            "WWW-Authenticate": "",
+            "Location": "https://tomcat.example:8443/manager/html",
+        }.get(name, default)
+
+        with mock.patch(
+            "drivers.tomcat.http.client.HTTPConnection",
+            return_value=connection,
+        ):
+            reason = TomcatDriver().preflight_target(
+                Target("tomcat.example", 8080, "http")
+            )
+
+        self.assertEqual(
+            reason,
+            "redirected to https://tomcat.example:8443/manager/html; "
+            "use that URL as the target",
+        )
+
+    def test_preflight_rejects_non_tomcat_authentication_challenge(self):
+        connection = mock.Mock()
+        response = connection.getresponse.return_value
+        response.status = 401
+        response.getheader.return_value = 'Basic realm="Other Application"'
+
+        with mock.patch(
+            "drivers.tomcat.http.client.HTTPConnection",
+            return_value=connection,
+        ):
+            reason = TomcatDriver().preflight_target(
+                Target("tomcat.example", 8080, "http")
+            )
+
+        self.assertEqual(
+            reason,
+            "expected an HTTP 401 Tomcat Basic authentication challenge, "
+            "received HTTP 401",
+        )
 
     def test_https_and_custom_uri_are_configurable(self):
         driver = TomcatDriver()
@@ -225,6 +291,30 @@ class StatusTests(unittest.TestCase):
                 output_file.read_text(encoding="utf-8"),
                 "https://tomcat.example:8080:admin:admin\n",
             )
+
+    def test_preflight_filters_unsuitable_targets_before_login_attempts(self):
+        accepted = Target("tomcat.example", 8443, "https")
+        redirected = Target("tomcat.example", 8080, "http")
+        driver = mock.Mock()
+        driver.preflight_target.side_effect = lambda target, timeout: (
+            None if target == accepted else "redirected"
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            targets = preflight_targets(
+                driver,
+                [accepted, redirected],
+                timeout=7,
+                threads=2,
+            )
+
+        self.assertEqual(targets, [accepted])
+        self.assertIn(
+            "[!] Skipping http://tomcat.example:8080: redirected",
+            output.getvalue(),
+        )
+        self.assertEqual(driver.preflight_target.call_count, 2)
 
 
 class CommandLineTests(unittest.TestCase):

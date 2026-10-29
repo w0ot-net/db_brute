@@ -34,6 +34,14 @@ class DatabaseDriver(ABC):
         if use_ssl or uri is not None:
             raise ValueError(f"{self.name} does not support --ssl or --uri")
 
+    def preflight_target(
+        self,
+        target: Target,
+        timeout: int = 5,
+    ) -> Optional[str]:
+        """Return a reason to skip a target, or None when checks may proceed."""
+        return None
+
     def connect_target(
         self,
         target: Target,

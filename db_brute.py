@@ -137,6 +137,38 @@ def test_credential(
         return success
 
 
+def preflight_target(driver, target: Target, timeout: int) -> tuple[Target, Optional[str]]:
+    """Check whether a target is suitable for the selected credential driver."""
+    try:
+        return target, driver.preflight_target(target, timeout)
+    except HostUnreachable as exc:
+        return target, f"unreachable: {exc}"
+
+
+def preflight_targets(
+    driver,
+    targets: list[Target],
+    timeout: int,
+    threads: int,
+) -> list[Target]:
+    """Filter targets through service-specific checks before scheduling logins."""
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        results = list(
+            executor.map(
+                lambda target: preflight_target(driver, target, timeout),
+                targets,
+            )
+        )
+
+    eligible_targets = []
+    for target, reason in results:
+        if reason is None:
+            eligible_targets.append(target)
+            continue
+        print(f"[!] Skipping {target.display()}: {reason}")
+    return eligible_targets
+
+
 def parse_credential_file(filepath: Path) -> list[tuple[str, str]]:
     """Parse a credential file with username:password format."""
     credentials = []
@@ -321,9 +353,19 @@ def main():
         print("[!] No credentials found in file", file=sys.stderr)
         sys.exit(1)
 
+    print(f"[*] Service: {driver.name.upper()}")
+    targets = preflight_targets(
+        driver,
+        targets,
+        timeout=args.timeout,
+        threads=args.threads,
+    )
+    if not targets:
+        print("[!] No targets passed service preflight", file=sys.stderr)
+        sys.exit(1)
+
     total_checks = len(targets) * len(credentials)
 
-    print(f"[*] Service: {driver.name.upper()}")
     print(f"[*] Targets: {len(targets)} | Credentials: {len(credentials)} ({cred_file.name}) | Total: {total_checks}")
     print(f"[*] Threads: {args.threads} | Output: {args.output}", end="")
     if args.log:
