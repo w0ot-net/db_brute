@@ -1,15 +1,16 @@
 # db_brute
 
-Database credential checker for authorized security testing. Supports multiple database types.
+Service credential checker for authorized security testing. Supports databases, SSH, and Apache Tomcat Manager.
 
-## Supported Databases
+## Supported Services
 
-| Database   | Default Port | Driver     |
-|------------|--------------|------------|
-| MySQL      | 3306         | pymysql    |
-| MSSQL      | 1433         | pymssql    |
-| PostgreSQL | 5432         | psycopg2   |
-| SSH        | 22           | paramiko   |
+| Service                | Default Port | Driver/Protocol |
+|------------------------|--------------|-----------------|
+| MySQL                  | 3306         | pymysql         |
+| MSSQL                  | 1433         | pymssql         |
+| PostgreSQL             | 5432         | psycopg2        |
+| SSH                    | 22           | paramiko        |
+| Apache Tomcat Manager  | 8080         | HTTP Basic      |
 
 ## Installation
 
@@ -27,31 +28,50 @@ pip3 install pymssql pymysql psycopg2-binary paramiko
 
 ```bash
 # Single target
-python3 db_brute.py --db mysql -t 192.168.1.100
-python3 db_brute.py --db postgres -t 10.0.0.50 -p 5433
+python3 db_brute.py --service mysql -t 192.168.1.100
+python3 db_brute.py --service postgres -t 10.0.0.50 -p 5433
 
 # Multiple targets from file
-python3 db_brute.py --db mssql -T targets.txt
+python3 db_brute.py --service mssql -T targets.txt
 
 # Custom credentials and output
-python3 db_brute.py --db mysql -t 192.168.1.100 -c custom_creds.txt -o results.txt
+python3 db_brute.py --service mysql -t 192.168.1.100 -c custom_creds.txt -o results.txt
+
+# Tomcat Manager over HTTP or HTTPS
+python3 db_brute.py --service tomcat -t 192.168.1.100
+python3 db_brute.py --service tomcat -t 192.168.1.100 -p 8443 --ssl
+python3 db_brute.py --service tomcat -t 192.168.1.100 --uri /custom/manager
 ```
 
-Note: If you omit `-c/--creds`, the tool uses the default `credz/<db>.txt` file for the selected database.
+If you omit `-c/--creds`, the tool uses `credz/<service>.txt`. The
+`credz/tomcat.txt` defaults are a deduplicated snapshot of Metasploit's Tomcat
+Manager username, password, and explicit username/password lists.
+
+The snapshot is generated from Metasploit Framework revision
+`54152b2f90a1ae66ff6b2cd90704ee8cdba97126` using:
+
+- `data/wordlists/tomcat_mgr_default_users.txt`
+- `data/wordlists/tomcat_mgr_default_pass.txt`
+- `data/wordlists/tomcat_mgr_default_userpass.txt`
+
+`--db` and `-d` remain available as aliases for `--service`.
 
 ## Options
 
 ```
---db, -d          Database type: mssql, mysql, postgres, ssh (required)
+--service, --db, -d
+                  Service type: mssql, mysql, postgres, ssh, tomcat (required)
 -t, --target      Single target (host or host:port)
 -T, --target-file File containing targets (one per line)
--p, --port        Port override (default: DB-specific)
--c, --creds       Credential file (default: credz/<db>.txt)
+-p, --port        Port override (default: service-specific)
+-c, --creds       Credential file (default: credz/<service>.txt)
 --threads         Concurrent threads (default: 1)
 --timeout         Connection timeout in seconds (default: 5)
 -o, --output      Output file for valid creds (default: ./valid_credz.txt)
 -l, --log         Log file for all attempts
 --delay           Delay between attempts per thread (default: 0)
+--ssl             Use HTTPS without certificate verification
+--uri             Service URI override (for example: /manager/html)
 ```
 
 ## File Formats

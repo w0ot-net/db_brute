@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Database credential checker - supports multiple database types.
+Service credential checker - supports multiple network service types.
 For authorized security testing only.
 """
 
@@ -162,28 +162,29 @@ def parse_targets(target: str, target_file: Path, default_port: int, port_overri
     return targets
 
 
-def get_default_cred_file(db_type: str) -> Path:
-    """Get default credential file path for a database type."""
+def get_default_cred_file(service: str) -> Path:
+    """Get the default credential file path for a service."""
     script_dir = Path(__file__).resolve().parent
-    return script_dir / 'credz' / f'{db_type}.txt'
+    return script_dir / 'credz' / f'{service}.txt'
 
 
-def main():
-    available_dbs = list_drivers()
-
+def build_parser(available_services: list[str]) -> argparse.ArgumentParser:
+    """Build the command-line parser."""
     parser = argparse.ArgumentParser(
-        description='Database credential checker for authorized security testing',
+        description='Service credential checker for authorized security testing',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  %(prog)s --db mysql -t 192.168.1.100
-  %(prog)s --db mssql -t 10.0.0.50 -p 1434 --threads 20
-  %(prog)s --db mysql -T targets.txt -c custom_creds.txt -o results.txt
+  %(prog)s --service mysql -t 192.168.1.100
+  %(prog)s --service mssql -t 10.0.0.50 -p 1434 --threads 20
+  %(prog)s --service tomcat -t 10.0.0.80
+  %(prog)s --service tomcat -t 10.0.0.80 -p 8443 --ssl
         '''
     )
 
-    parser.add_argument('--db', '-d', required=True, choices=available_dbs,
-                        help=f'Database type: {", ".join(available_dbs)}')
+    parser.add_argument('--service', '--db', '-d', dest='service', required=True,
+                        choices=available_services,
+                        help=f'Service type: {", ".join(available_services)}')
 
     target_group = parser.add_mutually_exclusive_group(required=True)
     target_group.add_argument('-t', '--target', help='Single target (host or host:port)')
@@ -191,9 +192,9 @@ Examples:
                               help='File containing targets (host:port per line)')
 
     parser.add_argument('-p', '--port', type=int, default=None,
-                        help='Port override (default: DB-specific)')
+                        help='Port override (default: service-specific)')
     parser.add_argument('-c', '--creds', type=Path, default=None,
-                        help='Credential file (default: credz/<db>.txt)')
+                        help='Credential file (default: credz/<service>.txt)')
     parser.add_argument('--threads', type=int, default=1,
                         help='Number of concurrent threads (default: 1)')
     parser.add_argument('--timeout', type=int, default=5,
@@ -204,14 +205,28 @@ Examples:
                         help='Log file for all attempts (optional)')
     parser.add_argument('--delay', type=float, default=0,
                         help='Delay in seconds between attempts per thread (default: 0)')
+    parser.add_argument('--ssl', action='store_true',
+                        help='Use HTTPS without certificate verification')
+    parser.add_argument('--uri', default=None,
+                        help='Service URI override (for example: /manager/html)')
+
+    return parser
+
+
+def main():
+    parser = build_parser(list_drivers())
 
     args = parser.parse_args()
 
     # Get driver
-    driver = get_driver(args.db)
+    driver = get_driver(args.service)
+    try:
+        driver.configure(use_ssl=args.ssl, uri=args.uri)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     # Set credential file
-    cred_file = args.creds if args.creds else get_default_cred_file(args.db)
+    cred_file = args.creds if args.creds else get_default_cred_file(args.service)
 
     if not cred_file.exists():
         print(f"[!] Credential file not found: {cred_file}", file=sys.stderr)
@@ -234,7 +249,7 @@ Examples:
 
     total_checks = len(targets) * len(credentials)
 
-    print(f"[*] Database: {driver.name.upper()}")
+    print(f"[*] Service: {driver.name.upper()}")
     print(f"[*] Targets: {len(targets)} | Credentials: {len(credentials)} ({cred_file.name}) | Total: {total_checks}")
     print(f"[*] Threads: {args.threads} | Output: {args.output}", end="")
     if args.log:

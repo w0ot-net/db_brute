@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 
 
 class HostUnreachable(Exception):
@@ -10,6 +11,11 @@ class DatabaseDriver(ABC):
 
     name: str = ""
     default_port: int = 0
+
+    def configure(self, use_ssl: bool = False, uri: Optional[str] = None) -> None:
+        """Apply optional service-specific connection settings."""
+        if use_ssl or uri is not None:
+            raise ValueError(f"{self.name} does not support --ssl or --uri")
 
     @abstractmethod
     def connect(self, host: str, port: int, username: str, password: str, timeout: int = 5) -> bool:

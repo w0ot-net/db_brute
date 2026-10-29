@@ -3,12 +3,14 @@ from .mssql import MSSQLDriver
 from .mysql import MySQLDriver
 from .postgres import PostgresDriver
 from .ssh import SSHDriver
+from .tomcat import TomcatDriver
 
 DRIVERS = {
     "mssql": MSSQLDriver,
     "mysql": MySQLDriver,
     "postgres": PostgresDriver,
     "ssh": SSHDriver,
+    "tomcat": TomcatDriver,
 }
 
 
