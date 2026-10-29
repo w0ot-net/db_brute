@@ -266,3 +266,16 @@ xampp:xampp
 root:owaspbwa
 admin:
 tomcat:
+# Additional curated pairs from Nuclei Templates
+# http/default-logins/apache/tomcat-default-login.yaml at revision
+# 64cf94fc18bfa5fd17faf435e2897dca63a0c6a2.
+demo:demo
+server_admin:owaspbwa
+vagrant:vagrant
+admin:admin123
+# SecLists Passwords/Default-Credentials/tomcat-betterdefaultpasslist.txt
+# at revision 1e3a7423c117ea878679a29c760564fe442021c0.
+admin:owaspbwa
+# Nmap nselib/data/http-default-accounts-fingerprints.lua at revision
+# 4bb08f8844508fd6403e8bf330dd3250e4d6d145.
+fhir:FHIRDefaultPassword

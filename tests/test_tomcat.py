@@ -133,18 +133,24 @@ class TomcatDriverTests(unittest.TestCase):
 
 
 class TomcatCredentialTests(unittest.TestCase):
-    def test_metasploit_credential_sources_are_combined_and_deduplicated(self):
+    def test_curated_credential_sources_are_combined_and_deduplicated(self):
         credential_file = (
             Path(__file__).resolve().parents[1] / "credz" / "tomcat.txt"
         )
         credentials = parse_credential_file(credential_file)
 
-        self.assertEqual(len(credentials), 263)
+        self.assertEqual(len(credentials), 269)
         self.assertEqual(len(credentials), len(set(credentials)))
         self.assertIn(("admin", ""), credentials)
         self.assertIn(("tomcat", ""), credentials)
         self.assertIn(("root", "owaspbwa"), credentials)
         self.assertIn(("j2deployer", "j2deployer"), credentials)
+        self.assertIn(("demo", "demo"), credentials)
+        self.assertIn(("server_admin", "owaspbwa"), credentials)
+        self.assertIn(("vagrant", "vagrant"), credentials)
+        self.assertIn(("admin", "admin123"), credentials)
+        self.assertIn(("admin", "owaspbwa"), credentials)
+        self.assertIn(("fhir", "FHIRDefaultPassword"), credentials)
 
 
 class TargetParsingTests(unittest.TestCase):

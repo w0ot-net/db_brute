@@ -46,7 +46,9 @@ python3 db_brute.py --service tomcat -T tomcat-urls.txt
 
 If you omit `-c/--creds`, the tool uses `credz/<service>.txt`. The
 `credz/tomcat.txt` defaults are a deduplicated snapshot of Metasploit's Tomcat
-Manager username, password, and explicit username/password lists.
+Manager username, password, and explicit username/password lists, augmented
+with non-overlapping curated defaults from Nuclei Templates, SecLists, and
+Nmap.
 
 The snapshot is generated from Metasploit Framework revision
 `54152b2f90a1ae66ff6b2cd90704ee8cdba97126` using:
