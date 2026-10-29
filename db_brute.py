@@ -14,7 +14,13 @@ from threading import Lock
 from typing import Optional
 from urllib.parse import urlsplit
 
-from drivers import get_driver, list_drivers, HostUnreachable, Target
+from drivers import (
+    get_driver,
+    list_drivers,
+    HostUnreachable,
+    Target,
+    TargetRejected,
+)
 
 
 class Status:
@@ -137,12 +143,18 @@ def test_credential(
         return success
 
 
-def preflight_target(driver, target: Target, timeout: int) -> tuple[Target, Optional[str]]:
+def preflight_target(
+    driver,
+    target: Target,
+    timeout: int,
+) -> tuple[Optional[Target], Optional[str]]:
     """Check whether a target is suitable for the selected credential driver."""
     try:
-        return target, driver.preflight_target(target, timeout)
+        return driver.preflight_target(target, timeout), None
     except HostUnreachable as exc:
-        return target, f"unreachable: {exc}"
+        return None, f"unreachable: {exc}"
+    except TargetRejected as exc:
+        return None, str(exc)
 
 
 def preflight_targets(
@@ -161,11 +173,14 @@ def preflight_targets(
         )
 
     eligible_targets = []
-    for target, reason in results:
-        if reason is None:
-            eligible_targets.append(target)
+    seen_targets = set()
+    for original_target, (resolved_target, reason) in zip(targets, results):
+        if resolved_target is not None:
+            if resolved_target not in seen_targets:
+                eligible_targets.append(resolved_target)
+                seen_targets.add(resolved_target)
             continue
-        print(f"[!] Skipping {target.display()}: {reason}")
+        print(f"[!] Skipping {original_target.display()}: {reason}")
     return eligible_targets
 
 

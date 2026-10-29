@@ -7,6 +7,10 @@ class HostUnreachable(Exception):
     """Raised when a target host is unreachable or stops responding."""
 
 
+class TargetRejected(Exception):
+    """Raised when a target is unsuitable for the selected service driver."""
+
+
 @dataclass(frozen=True)
 class Target:
     """A network target with an optional URL scheme."""
@@ -38,9 +42,9 @@ class DatabaseDriver(ABC):
         self,
         target: Target,
         timeout: int = 5,
-    ) -> Optional[str]:
-        """Return a reason to skip a target, or None when checks may proceed."""
-        return None
+    ) -> Target:
+        """Return the target that credential checks should use."""
+        return target
 
     def connect_target(
         self,

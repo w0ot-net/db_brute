@@ -2,8 +2,9 @@ import base64
 import http.client
 import ssl
 from typing import Optional
+from urllib.parse import urljoin, urlsplit
 
-from .base import DatabaseDriver, HostUnreachable, Target
+from .base import DatabaseDriver, HostUnreachable, Target, TargetRejected
 
 
 class TomcatDriver(DatabaseDriver):
@@ -63,8 +64,48 @@ class TomcatDriver(DatabaseDriver):
         self,
         target: Target,
         timeout: int = 5,
-    ) -> Optional[str]:
-        """Require a Tomcat Manager Basic-auth challenge before brute forcing."""
+    ) -> Target:
+        """Resolve safe redirects and require a Tomcat Basic-auth challenge."""
+        current = target
+        visited = set()
+
+        for _ in range(6):
+            if current in visited:
+                raise TargetRejected("redirect loop detected")
+            visited.add(current)
+
+            status, challenge, location = self._preflight_response(
+                current, timeout
+            )
+            challenge_lower = challenge.lower()
+            if (
+                status == 401
+                and "basic" in challenge_lower
+                and "tomcat" in challenge_lower
+            ):
+                return current
+
+            if 300 <= status < 400:
+                if not location:
+                    raise TargetRejected(
+                        f"received HTTP {status} redirect without a location"
+                    )
+                current = self._resolve_redirect(current, location)
+                continue
+
+            raise TargetRejected(
+                "expected an HTTP 401 Tomcat Basic authentication challenge, "
+                f"received HTTP {status}"
+            )
+
+        raise TargetRejected("too many redirects")
+
+    def _preflight_response(
+        self,
+        target: Target,
+        timeout: int,
+    ) -> tuple[int, str, Optional[str]]:
+        """Request one target without credentials and return auth metadata."""
         connection: Optional[http.client.HTTPConnection] = None
         try:
             connection = self._create_connection(
@@ -79,32 +120,41 @@ class TomcatDriver(DatabaseDriver):
                 headers={"User-Agent": "db_brute"},
             )
             response = connection.getresponse()
-            challenge = response.getheader("WWW-Authenticate", "")
-            challenge_lower = challenge.lower()
-            if (
-                response.status == 401
-                and "basic" in challenge_lower
-                and "tomcat" in challenge_lower
-            ):
-                return None
-
-            if 300 <= response.status < 400:
-                location = response.getheader("Location")
-                if location:
-                    return (
-                        f"redirected to {location}; use that URL as the target"
-                    )
-                return f"received HTTP {response.status} redirect without a location"
-
             return (
-                "expected an HTTP 401 Tomcat Basic authentication challenge, "
-                f"received HTTP {response.status}"
+                response.status,
+                response.getheader("WWW-Authenticate", ""),
+                response.getheader("Location"),
             )
         except (OSError, http.client.HTTPException) as exc:
             raise HostUnreachable(str(exc)) from exc
         finally:
             if connection is not None:
                 connection.close()
+
+    def _resolve_redirect(self, target: Target, location: str) -> Target:
+        """Resolve one same-host HTTP(S) redirect to the configured URI."""
+        scheme = target.scheme
+        if scheme is None:
+            scheme = "https" if self._target_uses_ssl(target) else "http"
+        base_target = Target(target.host, target.port, scheme)
+        redirected_url = urljoin(f"{base_target.display()}{self.uri}", location)
+        parsed = urlsplit(redirected_url)
+        if parsed.scheme not in ("http", "https"):
+            raise TargetRejected("redirect used an unsupported URL scheme")
+        if parsed.username is not None or parsed.password is not None:
+            raise TargetRejected("redirect URL contained credentials")
+        if parsed.hostname is None or parsed.hostname.lower() != target.host.lower():
+            raise TargetRejected("redirect target must remain on the original host")
+        if parsed.path != self.uri or parsed.query or parsed.fragment:
+            raise TargetRejected("redirect target changed the configured manager URI")
+
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise TargetRejected("redirect target used an invalid port") from exc
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
+        return Target(parsed.hostname, port, parsed.scheme)
 
     def _connect(
         self,

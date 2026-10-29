@@ -18,7 +18,7 @@ from db_brute import (
     preflight_targets,
 )
 from drivers import get_driver
-from drivers.base import HostUnreachable, Target
+from drivers.base import HostUnreachable, Target, TargetRejected
 from drivers.tomcat import TomcatDriver
 
 
@@ -72,11 +72,14 @@ class TomcatDriverTests(unittest.TestCase):
             "drivers.tomcat.http.client.HTTPConnection",
             return_value=connection,
         ):
-            reason = TomcatDriver().preflight_target(
+            resolved = TomcatDriver().preflight_target(
                 Target("tomcat.example", 8080, "http"), timeout=7
             )
 
-        self.assertIsNone(reason)
+        self.assertEqual(
+            resolved,
+            Target("tomcat.example", 8080, "http"),
+        )
         connection.request.assert_called_once_with(
             "GET",
             "/manager/html",
@@ -84,28 +87,42 @@ class TomcatDriverTests(unittest.TestCase):
         )
         connection.close.assert_called_once_with()
 
-    def test_preflight_rejects_unconditional_redirect(self):
-        connection = mock.Mock()
-        response = connection.getresponse.return_value
-        response.status = 302
-        response.getheader.side_effect = lambda name, default=None: {
+    def test_preflight_follows_same_host_redirect_and_revalidates(self):
+        http_connection = mock.Mock()
+        redirect_response = http_connection.getresponse.return_value
+        redirect_response.status = 302
+        redirect_response.getheader.side_effect = lambda name, default=None: {
             "WWW-Authenticate": "",
             "Location": "https://tomcat.example:8443/manager/html",
         }.get(name, default)
+        https_connection = mock.Mock()
+        challenge_response = https_connection.getresponse.return_value
+        challenge_response.status = 401
+        challenge_response.getheader.side_effect = lambda name, default=None: {
+            "WWW-Authenticate": 'Basic realm="Tomcat Manager Application"',
+            "Location": None,
+        }.get(name, default)
 
-        with mock.patch(
-            "drivers.tomcat.http.client.HTTPConnection",
-            return_value=connection,
+        with (
+            mock.patch(
+                "drivers.tomcat.http.client.HTTPConnection",
+                return_value=http_connection,
+            ),
+            mock.patch(
+                "drivers.tomcat.http.client.HTTPSConnection",
+                return_value=https_connection,
+            ),
         ):
-            reason = TomcatDriver().preflight_target(
+            resolved = TomcatDriver().preflight_target(
                 Target("tomcat.example", 8080, "http")
             )
 
         self.assertEqual(
-            reason,
-            "redirected to https://tomcat.example:8443/manager/html; "
-            "use that URL as the target",
+            resolved,
+            Target("tomcat.example", 8443, "https"),
         )
+        http_connection.close.assert_called_once_with()
+        https_connection.close.assert_called_once_with()
 
     def test_preflight_rejects_non_tomcat_authentication_challenge(self):
         connection = mock.Mock()
@@ -117,15 +134,34 @@ class TomcatDriverTests(unittest.TestCase):
             "drivers.tomcat.http.client.HTTPConnection",
             return_value=connection,
         ):
-            reason = TomcatDriver().preflight_target(
-                Target("tomcat.example", 8080, "http")
-            )
+            with self.assertRaisesRegex(
+                TargetRejected,
+                "expected an HTTP 401 Tomcat Basic authentication challenge",
+            ):
+                TomcatDriver().preflight_target(
+                    Target("tomcat.example", 8080, "http")
+                )
 
-        self.assertEqual(
-            reason,
-            "expected an HTTP 401 Tomcat Basic authentication challenge, "
-            "received HTTP 401",
-        )
+    def test_preflight_rejects_cross_host_redirect(self):
+        connection = mock.Mock()
+        response = connection.getresponse.return_value
+        response.status = 302
+        response.getheader.side_effect = lambda name, default=None: {
+            "WWW-Authenticate": "",
+            "Location": "https://other.example:8443/manager/html",
+        }.get(name, default)
+
+        with mock.patch(
+            "drivers.tomcat.http.client.HTTPConnection",
+            return_value=connection,
+        ):
+            with self.assertRaisesRegex(
+                TargetRejected,
+                "redirect target must remain on the original host",
+            ):
+                TomcatDriver().preflight_target(
+                    Target("tomcat.example", 8080, "http")
+                )
 
     def test_https_and_custom_uri_are_configurable(self):
         driver = TomcatDriver()
@@ -296,9 +332,13 @@ class StatusTests(unittest.TestCase):
         accepted = Target("tomcat.example", 8443, "https")
         redirected = Target("tomcat.example", 8080, "http")
         driver = mock.Mock()
-        driver.preflight_target.side_effect = lambda target, timeout: (
-            None if target == accepted else "redirected"
-        )
+
+        def preflight(target, timeout):
+            if target == accepted:
+                return accepted
+            raise TargetRejected("not Tomcat")
+
+        driver.preflight_target.side_effect = preflight
 
         output = io.StringIO()
         with redirect_stdout(output):
@@ -311,10 +351,28 @@ class StatusTests(unittest.TestCase):
 
         self.assertEqual(targets, [accepted])
         self.assertIn(
-            "[!] Skipping http://tomcat.example:8080: redirected",
+            "[!] Skipping http://tomcat.example:8080: not Tomcat",
             output.getvalue(),
         )
         self.assertEqual(driver.preflight_target.call_count, 2)
+
+    def test_preflight_silently_deduplicates_resolved_redirects(self):
+        redirected = Target("tomcat.example", 8080, "http")
+        destination = Target("tomcat.example", 8443, "https")
+        driver = mock.Mock()
+        driver.preflight_target.return_value = destination
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            targets = preflight_targets(
+                driver,
+                [redirected, destination],
+                timeout=7,
+                threads=2,
+            )
+
+        self.assertEqual(targets, [destination])
+        self.assertEqual(output.getvalue(), "")
 
 
 class CommandLineTests(unittest.TestCase):

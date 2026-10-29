@@ -1,4 +1,4 @@
-from .base import DatabaseDriver, HostUnreachable, Target
+from .base import DatabaseDriver, HostUnreachable, Target, TargetRejected
 from .mssql import MSSQLDriver
 from .mysql import MySQLDriver
 from .postgres import PostgresDriver
@@ -31,6 +31,7 @@ __all__ = [
     "DatabaseDriver",
     "HostUnreachable",
     "Target",
+    "TargetRejected",
     "get_driver",
     "list_drivers",
 ]
