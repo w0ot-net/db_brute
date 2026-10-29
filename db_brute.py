@@ -11,8 +11,10 @@ import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from typing import Optional
+from urllib.parse import urlsplit
 
-from drivers import get_driver, list_drivers, HostUnreachable
+from drivers import get_driver, list_drivers, HostUnreachable, Target
 
 
 class Status:
@@ -25,54 +27,71 @@ class Status:
         self.output_file = output_file
         self.log_file = log_file
         self.lock = Lock()
-        self.unreachable_hosts = set()
+        self.unreachable_targets = set()
 
-    def update(self, host: str, port: int, username: str, password: str, success: bool):
+    def update(
+        self,
+        target: Target,
+        username: str,
+        password: str,
+        success: bool,
+    ):
         with self.lock:
             self.completed += 1
-            target = f"{host}:{port}"
+            target_name = target.display()
 
             if self.log_file:
                 status_str = "SUCCESS" if success else "FAILED"
                 with open(self.log_file, 'a') as f:
-                    f.write(f"{status_str} {target} {username}:{password}\n")
+                    f.write(f"{status_str} {target_name} {username}:{password}\n")
 
             if success:
                 self.valid_count += 1
                 with open(self.output_file, 'a') as f:
-                    f.write(f"{host}:{port}:{username}:{password}\n")
-                sys.stdout.write(f"\r\033[K[+] VALID: {target} - {username}:{password}\n")
+                    f.write(f"{target_name}:{username}:{password}\n")
+                sys.stdout.write(
+                    f"\r\033[K[+] VALID: {target_name} - {username}:{password}\n"
+                )
 
-            self._draw_status(target, username, password)
+            self._draw_status(target_name, username, password)
 
-    def skip(self, host: str, port: int, username: str, password: str, reason: str = "unreachable"):
+    def skip(
+        self,
+        target: Target,
+        username: str,
+        password: str,
+        reason: str = "unreachable",
+    ):
         with self.lock:
             self.completed += 1
-            target = f"{host}:{port}"
+            target_name = target.display()
 
             if self.log_file:
                 with open(self.log_file, 'a') as f:
-                    f.write(f"SKIPPED {target} {username}:{password} {reason}\n")
+                    f.write(
+                        f"SKIPPED {target_name} {username}:{password} {reason}\n"
+                    )
 
-            self._draw_status(target, username, password)
+            self._draw_status(target_name, username, password)
 
-    def mark_unreachable(self, host: str, port: int, reason: str) -> bool:
+    def mark_unreachable(self, target: Target, reason: str) -> bool:
         with self.lock:
-            target = f"{host}:{port}"
-            if target in self.unreachable_hosts:
+            if target in self.unreachable_targets:
                 return False
-            self.unreachable_hosts.add(target)
-            sys.stdout.write(f"\n[!] Marking {target} as unreachable: {reason}\n")
+            self.unreachable_targets.add(target)
+            sys.stdout.write(
+                f"\n[!] Marking {target.display()} as unreachable: {reason}\n"
+            )
             sys.stdout.flush()
             return True
 
-    def is_unreachable(self, host: str, port: int) -> bool:
+    def is_unreachable(self, target: Target) -> bool:
         with self.lock:
-            return f"{host}:{port}" in self.unreachable_hosts
+            return target in self.unreachable_targets
 
-    def set_current(self, host: str, port: int, username: str, password: str):
+    def set_current(self, target: Target, username: str, password: str):
         with self.lock:
-            self._draw_status(f"{host}:{port}", username, password)
+            self._draw_status(target.display(), username, password)
 
     def _draw_status(self, target: str, username: str, password: str):
         pct = (self.completed / self.total) * 100 if self.total > 0 else 0
@@ -89,24 +108,32 @@ class Status:
             sys.stdout.flush()
 
 
-def test_credential(driver, host: str, port: int, username: str, password: str,
-                    timeout: int, status: Status, delay: float = 0, host_lock: Lock = None) -> bool:
+def test_credential(
+    driver,
+    target: Target,
+    username: str,
+    password: str,
+    timeout: int,
+    status: Status,
+    delay: float = 0,
+    host_lock: Lock = None,
+) -> bool:
     """Test a single credential against a target."""
     lock = host_lock if host_lock is not None else Lock()
     with lock:
         if delay > 0:
             time.sleep(delay)
-        if status.is_unreachable(host, port):
-            status.skip(host, port, username, password)
+        if status.is_unreachable(target):
+            status.skip(target, username, password)
             return False
-        status.set_current(host, port, username, password)
+        status.set_current(target, username, password)
         try:
-            success = driver.connect(host, port, username, password, timeout)
+            success = driver.connect_target(target, username, password, timeout)
         except HostUnreachable as exc:
-            status.mark_unreachable(host, port, str(exc))
-            status.skip(host, port, username, password, str(exc))
+            status.mark_unreachable(target, str(exc))
+            status.skip(target, username, password, str(exc))
             return False
-        status.update(host, port, username, password, success)
+        status.update(target, username, password, success)
         return success
 
 
@@ -126,38 +153,74 @@ def parse_credential_file(filepath: Path) -> list[tuple[str, str]]:
     return credentials
 
 
-def parse_targets(target: str, target_file: Path, default_port: int, port_override: int = None) -> list[tuple[str, int]]:
-    """
-    Parse targets from either a single target string or a file.
-    Returns list of (host, port) tuples.
-    If port_override is set, it takes precedence over any port in the target.
-    """
+def parse_target(
+    value: str,
+    default_port: int,
+    port_override: Optional[int] = None,
+) -> Target:
+    """Parse a URL, host:port pair, or bare host into a target."""
+    if "://" in value:
+        parsed = urlsplit(value)
+        scheme = parsed.scheme.lower()
+        if scheme not in ("http", "https"):
+            raise ValueError(f"unsupported URL scheme in target: {value}")
+        if not parsed.hostname:
+            raise ValueError(f"URL target is missing a hostname: {value}")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError(f"URL target must not contain credentials: {value}")
+        if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            raise ValueError(
+                f"URL target must be a base URL without a path, query, or fragment: {value}"
+            )
+        try:
+            parsed_port = parsed.port
+        except ValueError as exc:
+            raise ValueError(f"invalid port in target: {value}") from exc
+        if port_override is not None:
+            port = port_override
+        else:
+            port = parsed_port or (443 if scheme == "https" else 80)
+        return Target(parsed.hostname, port, scheme)
+
+    if port_override is not None:
+        host = value.rsplit(":", 1)[0] if ":" in value else value
+        return Target(host, port_override)
+    if ":" in value:
+        host, port_text = value.rsplit(":", 1)
+        try:
+            port = int(port_text)
+        except ValueError as exc:
+            raise ValueError(f"invalid port in target: {value}") from exc
+        return Target(host, port)
+    return Target(value, default_port)
+
+
+def parse_targets(
+    target: Optional[str],
+    target_file: Optional[Path],
+    default_port: int,
+    port_override: Optional[int] = None,
+) -> list[Target]:
+    """Parse targets from a single value or a file."""
     targets = []
 
     if target:
-        if port_override:
-            host = target.rsplit(':', 1)[0] if ':' in target else target
-            targets.append((host, port_override))
-        elif ':' in target:
-            host, port = target.rsplit(':', 1)
-            targets.append((host, int(port)))
-        else:
-            targets.append((target, default_port))
+        targets.append(parse_target(target, default_port, port_override))
 
     if target_file:
-        with open(target_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
+        with open(target_file, "r", encoding="utf-8") as f:
+            for line_number, line in enumerate(f, start=1):
+                value = line.strip()
+                if not value or value.startswith("#"):
                     continue
-                if port_override:
-                    host = line.rsplit(':', 1)[0] if ':' in line else line
-                    targets.append((host, port_override))
-                elif ':' in line:
-                    host, port = line.rsplit(':', 1)
-                    targets.append((host, int(port)))
-                else:
-                    targets.append((line, default_port))
+                try:
+                    targets.append(
+                        parse_target(value, default_port, port_override)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{target_file}:{line_number}: {exc}"
+                    ) from exc
 
     return targets
 
@@ -187,9 +250,11 @@ Examples:
                         help=f'Service type: {", ".join(available_services)}')
 
     target_group = parser.add_mutually_exclusive_group(required=True)
-    target_group.add_argument('-t', '--target', help='Single target (host or host:port)')
+    target_group.add_argument(
+        '-t', '--target', help='Single target (host, host:port, or URL)'
+    )
     target_group.add_argument('-T', '--target-file', type=Path,
-                              help='File containing targets (host:port per line)')
+                              help='File containing targets (one per line)')
 
     parser.add_argument('-p', '--port', type=int, default=None,
                         help='Port override (default: service-specific)')
@@ -206,7 +271,7 @@ Examples:
     parser.add_argument('--delay', type=float, default=0,
                         help='Delay in seconds between attempts per thread (default: 0)')
     parser.add_argument('--ssl', action='store_true',
-                        help='Use HTTPS without certificate verification')
+                        help='Use HTTPS for scheme-less targets (no certificate verification)')
     parser.add_argument('--uri', default=None,
                         help='Service URI override (for example: /manager/html)')
 
@@ -236,7 +301,16 @@ def main():
         print(f"[!] Target file not found: {args.target_file}", file=sys.stderr)
         sys.exit(1)
 
-    targets = parse_targets(args.target, args.target_file, driver.default_port, args.port)
+    try:
+        targets = parse_targets(
+            args.target, args.target_file, driver.default_port, args.port
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+
+    if any(target.scheme for target in targets) and not driver.supports_url_targets:
+        parser.error(f"{driver.name} does not support URL targets")
+
     credentials = parse_credential_file(cred_file)
 
     if not targets:
@@ -265,18 +339,17 @@ def main():
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         futures = []
         for username, password in credentials:
-            for host, port in targets:
+            for target in targets:
                 future = executor.submit(
                     test_credential,
                     driver,
-                    host,
-                    port,
+                    target,
                     username,
                     password,
                     args.timeout,
                     status,
                     args.delay,
-                    host_locks[(host, port)]
+                    host_locks[target],
                 )
                 futures.append(future)
 

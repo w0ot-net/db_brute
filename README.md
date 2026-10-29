@@ -41,6 +41,7 @@ python3 db_brute.py --service mysql -t 192.168.1.100 -c custom_creds.txt -o resu
 python3 db_brute.py --service tomcat -t 192.168.1.100
 python3 db_brute.py --service tomcat -t 192.168.1.100 -p 8443 --ssl
 python3 db_brute.py --service tomcat -t 192.168.1.100 --uri /custom/manager
+python3 db_brute.py --service tomcat -T tomcat-urls.txt
 ```
 
 If you omit `-c/--creds`, the tool uses `credz/<service>.txt`. The
@@ -61,7 +62,7 @@ The snapshot is generated from Metasploit Framework revision
 ```
 --service, --db, -d
                   Service type: mssql, mysql, postgres, ssh, tomcat (required)
--t, --target      Single target (host or host:port)
+-t, --target      Single target (host, host:port, or URL)
 -T, --target-file File containing targets (one per line)
 -p, --port        Port override (default: service-specific)
 -c, --creds       Credential file (default: credz/<service>.txt)
@@ -70,7 +71,7 @@ The snapshot is generated from Metasploit Framework revision
 -o, --output      Output file for valid creds (default: ./valid_credz.txt)
 -l, --log         Log file for all attempts
 --delay           Delay between attempts per thread (default: 0)
---ssl             Use HTTPS without certificate verification
+--ssl             Use HTTPS for scheme-less targets without certificate checks
 --uri             Service URI override (for example: /manager/html)
 ```
 
@@ -81,7 +82,15 @@ The snapshot is generated from Metasploit Framework revision
 192.168.1.100
 192.168.1.101:3307
 db.example.com
+https://192.168.1.102:8443
+http://192.168.1.103:8080
 ```
+
+Tomcat target files may mix `http://` and `https://` base URLs. The URL scheme
+is applied per target and takes precedence over `--ssl`. URLs without explicit
+ports use 80 for HTTP and 443 for HTTPS. Use `--uri` to change the default
+`/manager/html` path for all Tomcat targets. HTTPS certificate verification is
+disabled to support internal services using self-signed certificates.
 
 ### Credentials file
 ```

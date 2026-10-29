@@ -3,7 +3,7 @@ import http.client
 import ssl
 from typing import Optional
 
-from .base import DatabaseDriver, HostUnreachable
+from .base import DatabaseDriver, HostUnreachable, Target
 
 
 class TomcatDriver(DatabaseDriver):
@@ -11,6 +11,7 @@ class TomcatDriver(DatabaseDriver):
 
     name = "tomcat"
     default_port = 8080
+    supports_url_targets = True
     default_uri = "/manager/html"
     success_statuses = {200, 201, *range(300, 310)}
 
@@ -36,9 +37,42 @@ class TomcatDriver(DatabaseDriver):
         timeout: int = 5,
     ) -> bool:
         """Attempt to authenticate to the Tomcat Manager HTML interface."""
+        return self._connect(
+            host, port, username, password, timeout, use_ssl=self.use_ssl
+        )
+
+    def connect_target(
+        self,
+        target: Target,
+        username: str,
+        password: str,
+        timeout: int = 5,
+    ) -> bool:
+        """Use a URL target's scheme, falling back to the global SSL option."""
+        use_ssl = self.use_ssl
+        if target.scheme is not None:
+            use_ssl = target.scheme == "https"
+        return self._connect(
+            target.host,
+            target.port,
+            username,
+            password,
+            timeout,
+            use_ssl=use_ssl,
+        )
+
+    def _connect(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        timeout: int,
+        use_ssl: bool,
+    ) -> bool:
         connection: Optional[http.client.HTTPConnection] = None
         try:
-            if self.use_ssl:
+            if use_ssl:
                 context = ssl.create_default_context()
                 context.check_hostname = False
                 context.verify_mode = ssl.CERT_NONE
